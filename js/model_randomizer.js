@@ -336,31 +336,47 @@ app.registerExtension({
             this.setSize(this.computeSize());
         };
 
-        // --- onConfigure: restore from saved workflow ---
-        const origOnConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function (info) {
-            const savedCount = info.properties?.modelCount || 0;
+        const origOnSerialize = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function (o) {
+            origOnSerialize?.apply(this, arguments);
+            const entries = [];
+            for (let i = 1; i <= this._modelCount; i++) {
+                entries.push({
+                    ckpt: this.widgets.find(w => w.name === `ckpt_${i}`)?.value,
+                    cfg_min: this.widgets.find(w => w.name === `cfg_min_${i}`)?.value,
+                    cfg_max: this.widgets.find(w => w.name === `cfg_max_${i}`)?.value,
+                    weight: this.widgets.find(w => w.name === `weight_${i}`)?.value,
+                    enabled: this.widgets.find(w => w.name === `enabled_${i}`)?.value,
+                });
+            }
+            o.properties = o.properties || {};
+            o.properties.modelEntries = entries;
+            o.properties.modelCount = this._modelCount;
+        };
 
-            if (savedCount > 0) {
-                // Remove the default entry created by onNodeCreated
-                for (let i = this.widgets.length - 1; i >= 0; i--) {
-                    const n = this.widgets[i]?.name;
-                    if (n && (n.startsWith("sep_") || n.startsWith("ckpt_") ||
-                        n.startsWith("cfg_min_") || n.startsWith("cfg_max_") ||
-                        n.startsWith("weight_") || n.startsWith("enabled_"))) {
-                        this.widgets.splice(i, 1);
-                    }
-                }
-                this._modelCount = 0;
-
-                for (let i = 0; i < savedCount; i++) {
-                    this._modelCount++;
-                    addModelEntry(this, this._modelCount, checkpoints);
+        const origConfigure = nodeType.prototype.configure;
+        nodeType.prototype.configure = function (info) {
+            // Nuke model widgets BEFORE super.configure so LiteGraph's
+            // widgets_values restoration has nothing to mismatch against
+            for (let i = this.widgets.length - 1; i >= 0; i--) {
+                const n = this.widgets[i]?.name;
+                if (n && (n.startsWith("sep_") || n.startsWith("ckpt_") ||
+                    n.startsWith("cfg_min_") || n.startsWith("cfg_max_") ||
+                    n.startsWith("weight_") || n.startsWith("enabled_"))) {
+                    this.widgets.splice(i, 1);
                 }
             }
+            this._modelCount = 0;
 
-            // Let ComfyUI restore widget values by index
-            origOnConfigure?.apply(this, arguments);
+            origConfigure?.apply(this, arguments);
+
+            const entries = info.properties?.modelEntries || [];
+            const savedCount = entries.length || info.properties?.modelCount || 0;
+
+            for (let i = 0; i < savedCount; i++) {
+                this._modelCount++;
+                addModelEntry(this, this._modelCount, checkpoints, entries[i]);
+            }
 
             resizeNodeToFit(this);
             app.graph.setDirtyCanvas(true, true);
