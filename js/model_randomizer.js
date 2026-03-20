@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const WIDGETS_PER_ENTRY = 6; // separator, ckpt, cfg_min, cfg_max, weight, enabled
+const WIDGETS_PER_ENTRY = 6; // header, ckpt, cfg_min, cfg_max, weight, enabled
 const NODE_CLASS = "ModelRandomizer";
 const ANCHOR_WIDGET = "action_separator";
 
@@ -68,6 +68,46 @@ function drawStyledButton(ctx, x, y, w, h, label, isPressed, colors) {
     ctx.restore();
 }
 
+function drawSmallButton(ctx, x, y, w, h, label, isPressed, disabled) {
+    const radius = 3;
+    const lowQ = isLowQuality();
+
+    if (disabled) {
+        drawRoundedRect(ctx, x, y, w, h, radius, "#2a2a2a", lowQ ? null : "#3a3a3a");
+        if (!lowQ) {
+            ctx.save();
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#555";
+            ctx.font = "11px Arial";
+            ctx.fillText(label, x + w / 2, y + h / 2);
+            ctx.restore();
+        }
+        return;
+    }
+
+    if (!lowQ && !isPressed) {
+        drawRoundedRect(ctx, x + 0.5, y + 0.5, w, h, radius, "#00000033");
+    }
+
+    const offsetY = isPressed ? 1 : 0;
+    drawRoundedRect(
+        ctx, x, y + offsetY, w, h, radius,
+        isPressed ? "#3a3a3a" : "#4a4a4a",
+        lowQ ? null : "#666"
+    );
+
+    if (lowQ) return;
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = isPressed ? "#ccc" : "#ddd";
+    ctx.font = "11px Arial";
+    ctx.fillText(label, x + w / 2, y + h / 2 + offsetY);
+    ctx.restore();
+}
+
 // ── Custom Widgets ─────────────────────────────────────────────────
 
 function createDividerWidget(name, opts = {}) {
@@ -108,74 +148,127 @@ function createDividerWidget(name, opts = {}) {
     };
 }
 
-function createActionButtonsWidget(addCallback, removeCallback) {
+function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
     return {
-        name: "model_actions",
+        name: `header_${index}`,
         type: "custom",
         value: "",
         y: 0,
         last_y: 0,
         options: { serialize: false },
-        _addPressed: false,
-        _removePressed: false,
-        _addBounds: null,
-        _removeBounds: null,
+        _entryIndex: index,
+        _upPressed: false,
+        _downPressed: false,
+        _deletePressed: false,
+        _upBounds: null,
+        _downBounds: null,
+        _deleteBounds: null,
         _mouseDownTarget: null,
 
         draw(ctx, node, width, y, height) {
             this.last_y = y;
             const margin = 15;
-            const gap = 4;
-            const totalW = width - margin * 2;
-            const addW = Math.floor(totalW * 0.58);
-            const removeW = totalW - addW - gap;
+            const lowQ = isLowQuality();
 
-            // Store bounds for hit testing
-            this._addBounds = [margin, y, addW, height];
-            this._removeBounds = [margin + addW + gap, y, removeW, height];
+            // Top divider line
+            if (!lowQ) {
+                ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(margin, y + 4);
+                ctx.lineTo(width - margin, y + 4);
+                ctx.stroke();
+            }
 
-            drawStyledButton(ctx, margin, y, addW, height,
-                "\u2795 Add Model", this._addPressed,
-                { bg: "#2a4a2a", pressed: "#1a3a1a", border: "#3a6a3a", text: "#9fcf9f" });
+            if (lowQ) return;
 
-            drawStyledButton(ctx, margin + addW + gap, y, removeW, height,
-                "\u2796 Remove", this._removePressed,
-                { bg: "#4a2a2a", pressed: "#3a1a1a", border: "#6a3a3a", text: "#cf9f9f" });
+            // Vertical center for label and buttons (shifted down for divider)
+            const centerY = y + height * 0.5 + 3;
+
+            // Label
+            ctx.save();
+            ctx.fillStyle = "#999";
+            ctx.font = "11px Arial";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(`Model ${this._entryIndex}`, margin + 2, centerY);
+            ctx.restore();
+
+            // Button layout (right-aligned): [▲] [▼] [✕]
+            const btnH = 16;
+            const btnW = 20;
+            const btnGap = 3;
+            const btnY = centerY - btnH / 2;
+
+            const isFirst = this._entryIndex === 1;
+            const isLast = this._entryIndex === node._modelCount;
+            const isOnly = node._modelCount <= 1;
+
+            // ✕ Delete (rightmost)
+            const delX = width - margin - btnW;
+            this._deleteBounds = [delX, btnY, btnW, btnH];
+            drawSmallButton(ctx, delX, btnY, btnW, btnH, "\u2715", this._deletePressed, isOnly);
+
+            // ▼ Move Down
+            const downX = delX - btnW - btnGap;
+            this._downBounds = [downX, btnY, btnW, btnH];
+            drawSmallButton(ctx, downX, btnY, btnW, btnH, "\u25BC", this._downPressed, isLast);
+
+            // ▲ Move Up
+            const upX = downX - btnW - btnGap;
+            this._upBounds = [upX, btnY, btnW, btnH];
+            drawSmallButton(ctx, upX, btnY, btnW, btnH, "\u25B2", this._upPressed, isFirst);
         },
 
         _hitTest(pos) {
-            const a = this._addBounds;
-            if (a && pos[0] >= a[0] && pos[0] <= a[0] + a[2] &&
-                pos[1] >= a[1] && pos[1] <= a[1] + a[3]) return "add";
-            const r = this._removeBounds;
-            if (r && pos[0] >= r[0] && pos[0] <= r[0] + r[2] &&
-                pos[1] >= r[1] && pos[1] <= r[1] + r[3]) return "remove";
+            const tests = [
+                ["up", this._upBounds],
+                ["down", this._downBounds],
+                ["delete", this._deleteBounds],
+            ];
+            for (const [name, bounds] of tests) {
+                if (bounds &&
+                    pos[0] >= bounds[0] && pos[0] <= bounds[0] + bounds[2] &&
+                    pos[1] >= bounds[1] && pos[1] <= bounds[1] + bounds[3]) {
+                    return name;
+                }
+            }
             return null;
+        },
+
+        _isDisabled(target, node) {
+            if (target === "up") return this._entryIndex === 1;
+            if (target === "down") return this._entryIndex === node._modelCount;
+            if (target === "delete") return node._modelCount <= 1;
+            return false;
         },
 
         mouse(event, pos, node) {
             if (event.type === "pointerdown") {
                 const target = this._hitTest(pos);
-                if (!target) return false;
+                if (!target || this._isDisabled(target, node)) return false;
                 this._mouseDownTarget = target;
-                if (target === "add") this._addPressed = true;
-                if (target === "remove") this._removePressed = true;
+                if (target === "up") this._upPressed = true;
+                if (target === "down") this._downPressed = true;
+                if (target === "delete") this._deletePressed = true;
                 app.graph.setDirtyCanvas(true, false);
                 return true;
             }
 
             if (event.type === "pointerup") {
                 const wasTarget = this._mouseDownTarget;
-                this._addPressed = false;
-                this._removePressed = false;
+                this._upPressed = false;
+                this._downPressed = false;
+                this._deletePressed = false;
                 this._mouseDownTarget = null;
                 app.graph.setDirtyCanvas(true, false);
                 if (!wasTarget) return false;
 
                 const target = this._hitTest(pos);
-                if (target === wasTarget) {
-                    if (target === "add") addCallback.call(node);
-                    if (target === "remove") removeCallback.call(node);
+                if (target === wasTarget && !this._isDisabled(target, node)) {
+                    if (target === "up") onMoveUp.call(node, this._entryIndex);
+                    if (target === "down") onMoveDown.call(node, this._entryIndex);
+                    if (target === "delete") onDelete.call(node, this._entryIndex);
                 }
                 return true;
             }
@@ -183,8 +276,75 @@ function createActionButtonsWidget(addCallback, removeCallback) {
             if (event.type === "pointermove") {
                 if (!this._mouseDownTarget) return false;
                 const target = this._hitTest(pos);
-                this._addPressed = (this._mouseDownTarget === "add" && target === "add");
-                this._removePressed = (this._mouseDownTarget === "remove" && target === "remove");
+                this._upPressed = (this._mouseDownTarget === "up" && target === "up");
+                this._downPressed = (this._mouseDownTarget === "down" && target === "down");
+                this._deletePressed = (this._mouseDownTarget === "delete" && target === "delete");
+                app.graph.setDirtyCanvas(true, false);
+                return true;
+            }
+
+            return false;
+        },
+
+        computeSize(width) {
+            return [width, LiteGraph.NODE_WIDGET_HEIGHT + 8];
+        },
+
+        serializeValue() { return null; },
+    };
+}
+
+function createAddButtonWidget(addCallback) {
+    return {
+        name: "model_actions",
+        type: "custom",
+        value: "",
+        y: 0,
+        last_y: 0,
+        options: { serialize: false },
+        _pressed: false,
+        _bounds: null,
+        _mouseDown: false,
+
+        draw(ctx, node, width, y, height) {
+            this.last_y = y;
+            const margin = 15;
+            const w = width - margin * 2;
+            this._bounds = [margin, y, w, height];
+
+            drawStyledButton(ctx, margin, y, w, height,
+                "\u2795 Add Model", this._pressed,
+                { bg: "#2a4a2a", pressed: "#1a3a1a", border: "#3a6a3a", text: "#9fcf9f" });
+        },
+
+        _isInside(pos) {
+            const b = this._bounds;
+            return b && pos[0] >= b[0] && pos[0] <= b[0] + b[2] &&
+                pos[1] >= b[1] && pos[1] <= b[1] + b[3];
+        },
+
+        mouse(event, pos, node) {
+            if (event.type === "pointerdown") {
+                if (!this._isInside(pos)) return false;
+                this._mouseDown = true;
+                this._pressed = true;
+                app.graph.setDirtyCanvas(true, false);
+                return true;
+            }
+
+            if (event.type === "pointerup") {
+                const wasDown = this._mouseDown;
+                this._pressed = false;
+                this._mouseDown = false;
+                app.graph.setDirtyCanvas(true, false);
+                if (!wasDown) return false;
+                if (this._isInside(pos)) addCallback.call(node);
+                return true;
+            }
+
+            if (event.type === "pointermove") {
+                if (!this._mouseDown) return false;
+                this._pressed = this._isInside(pos);
                 app.graph.setDirtyCanvas(true, false);
                 return true;
             }
@@ -207,6 +367,72 @@ function resizeNodeToFit(node) {
     node.setSize([Math.max(node.size[0], sz[0]), sz[1]]);
 }
 
+// ── Entry Manipulation ─────────────────────────────────────────────
+
+function swapModelEntries(node, idxA, idxB) {
+    const fields = ["ckpt", "cfg_min", "cfg_max", "weight", "enabled"];
+    for (const field of fields) {
+        const wA = node.widgets.find((w) => w.name === `${field}_${idxA}`);
+        const wB = node.widgets.find((w) => w.name === `${field}_${idxB}`);
+        if (wA && wB) {
+            const tmp = wA.value;
+            wA.value = wB.value;
+            wB.value = tmp;
+        }
+    }
+}
+
+function removeModelEntryAt(node, targetIndex) {
+    if (node._modelCount <= 1) return false;
+
+    const prefixes = ["header", "ckpt", "cfg_min", "cfg_max", "weight", "enabled"];
+
+    for (const prefix of prefixes) {
+        const idx = node.widgets.findIndex((w) => w.name === `${prefix}_${targetIndex}`);
+        if (idx >= 0) node.widgets.splice(idx, 1);
+    }
+
+    for (let i = targetIndex + 1; i <= node._modelCount; i++) {
+        const newIdx = i - 1;
+        for (const prefix of prefixes) {
+            const w = node.widgets.find((w) => w.name === `${prefix}_${i}`);
+            if (w) {
+                w.name = `${prefix}_${newIdx}`;
+                if (prefix === "header") {
+                    w._entryIndex = newIdx;
+                }
+            }
+        }
+    }
+
+    node._modelCount--;
+    node.properties = node.properties || {};
+    node.properties.modelCount = node._modelCount;
+
+    return true;
+}
+
+// ── Entry Action Callbacks (called with `this` = node) ─────────────
+
+function handleMoveUp(entryIndex) {
+    if (entryIndex <= 1) return;
+    swapModelEntries(this, entryIndex, entryIndex - 1);
+    app.graph.setDirtyCanvas(true, true);
+}
+
+function handleMoveDown(entryIndex) {
+    if (entryIndex >= this._modelCount) return;
+    swapModelEntries(this, entryIndex, entryIndex + 1);
+    app.graph.setDirtyCanvas(true, true);
+}
+
+function handleDeleteEntry(entryIndex) {
+    if (removeModelEntryAt(this, entryIndex)) {
+        resizeNodeToFit(this);
+        app.graph.setDirtyCanvas(true, true);
+    }
+}
+
 // ── Core Widget Management ─────────────────────────────────────────
 
 function addModelEntry(node, index, checkpoints, defaults) {
@@ -220,9 +446,10 @@ function addModelEntry(node, index, checkpoints, defaults) {
 
     const newWidgets = [];
 
-    // Entry divider — visual <hr> between model groups
     newWidgets.push(
-        node.addCustomWidget(createDividerWidget(`sep_${index}`))
+        node.addCustomWidget(
+            createEntryHeaderWidget(index, handleMoveUp, handleMoveDown, handleDeleteEntry)
+        )
     );
 
     newWidgets.push(
@@ -272,24 +499,6 @@ function addModelEntry(node, index, checkpoints, defaults) {
     return newWidgets;
 }
 
-function removeLastModelEntry(node) {
-    if (node._modelCount <= 1) return false;
-
-    const anchorIdx = node.widgets.findIndex((w) => w.name === ANCHOR_WIDGET);
-    if (anchorIdx < WIDGETS_PER_ENTRY) return false;
-
-    // Remove the WIDGETS_PER_ENTRY widgets just before the anchor
-    const removeStart = anchorIdx - WIDGETS_PER_ENTRY;
-    node.widgets.splice(removeStart, WIDGETS_PER_ENTRY);
-    node._modelCount--;
-
-    // Persist to properties for workflow save/load
-    node.properties = node.properties || {};
-    node.properties.modelCount = node._modelCount;
-
-    return true;
-}
-
 // ── Extension Registration ─────────────────────────────────────────
 
 app.registerExtension({
@@ -308,7 +517,7 @@ app.registerExtension({
             this._modelCount = 0;
 
             this.addCustomWidget(createDividerWidget(ANCHOR_WIDGET));
-            this.addCustomWidget(createActionButtonsWidget(
+            this.addCustomWidget(createAddButtonWidget(
                 // Add Model callback
                 async function () {
                     const freshCheckpoints = await fetchCheckpoints(true);
@@ -318,13 +527,6 @@ app.registerExtension({
                     this.properties.modelCount = this._modelCount;
                     resizeNodeToFit(this);
                     app.graph.setDirtyCanvas(true, true);
-                },
-                // Remove Model callback
-                function () {
-                    if (removeLastModelEntry(this)) {
-                        resizeNodeToFit(this);
-                        app.graph.setDirtyCanvas(true, true);
-                    }
                 }
             ));
 
@@ -357,12 +559,14 @@ app.registerExtension({
         const origConfigure = nodeType.prototype.configure;
         nodeType.prototype.configure = function (info) {
             // Nuke model widgets BEFORE super.configure so LiteGraph's
-            // widgets_values restoration has nothing to mismatch against
+            // widgets_values restoration has nothing to mismatch against.
+            // Includes both header_ (current) and sep_ (legacy) prefixes.
             for (let i = this.widgets.length - 1; i >= 0; i--) {
                 const n = this.widgets[i]?.name;
-                if (n && (n.startsWith("sep_") || n.startsWith("ckpt_") ||
-                    n.startsWith("cfg_min_") || n.startsWith("cfg_max_") ||
-                    n.startsWith("weight_") || n.startsWith("enabled_"))) {
+                if (n && (n.startsWith("header_") || n.startsWith("sep_") ||
+                    n.startsWith("ckpt_") || n.startsWith("cfg_min_") ||
+                    n.startsWith("cfg_max_") || n.startsWith("weight_") ||
+                    n.startsWith("enabled_"))) {
                     this.widgets.splice(i, 1);
                 }
             }
