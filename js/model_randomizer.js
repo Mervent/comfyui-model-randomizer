@@ -174,6 +174,7 @@ function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
         _downBounds: null,
         _deleteBounds: null,
         _mouseDownTarget: null,
+        _hovering: false,
 
         draw(ctx, node, width, y, height) {
             this.last_y = y;
@@ -293,8 +294,18 @@ function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
             }
 
             if (event.type === "pointermove") {
-                if (!this._mouseDownTarget) return false;
                 const target = this._hitTest(pos);
+                const overClickable = target && !this._isDisabled(target, node);
+                const canvasEl = app.canvas.canvas;
+                if (overClickable) {
+                    canvasEl.style.cursor = "pointer";
+                    this._hovering = true;
+                } else if (this._hovering) {
+                    canvasEl.style.cursor = "";
+                    this._hovering = false;
+                }
+
+                if (!this._mouseDownTarget) return false;
                 this._upPressed = (this._mouseDownTarget === "up" && target === "up");
                 this._downPressed = (this._mouseDownTarget === "down" && target === "down");
                 this._deletePressed = (this._mouseDownTarget === "delete" && target === "delete");
