@@ -68,17 +68,27 @@ function drawStyledButton(ctx, x, y, w, h, label, isPressed, colors) {
     ctx.restore();
 }
 
-function drawSmallButton(ctx, x, y, w, h, label, isPressed, disabled) {
+function drawSmallButton(ctx, x, y, w, h, label, isPressed, disabled, colors) {
     const radius = 3;
     const lowQ = isLowQuality();
 
+    const c = colors || {};
+    const bgColor = c.bg || "#4a4a4a";
+    const pressedColor = c.pressed || "#3a3a3a";
+    const borderColor = c.border || "#666";
+    const textColor = c.text || "#ddd";
+    const textPressedColor = c.textPressed || "#ccc";
+    const disabledBg = c.disabledBg || "#2a2a2a";
+    const disabledBorder = c.disabledBorder || "#3a3a3a";
+    const disabledText = c.disabledText || "#555";
+
     if (disabled) {
-        drawRoundedRect(ctx, x, y, w, h, radius, "#2a2a2a", lowQ ? null : "#3a3a3a");
+        drawRoundedRect(ctx, x, y, w, h, radius, disabledBg, lowQ ? null : disabledBorder);
         if (!lowQ) {
             ctx.save();
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = "#555";
+            ctx.fillStyle = disabledText;
             ctx.font = "11px Arial";
             ctx.fillText(label, x + w / 2, y + h / 2);
             ctx.restore();
@@ -93,8 +103,8 @@ function drawSmallButton(ctx, x, y, w, h, label, isPressed, disabled) {
     const offsetY = isPressed ? 1 : 0;
     drawRoundedRect(
         ctx, x, y + offsetY, w, h, radius,
-        isPressed ? "#3a3a3a" : "#4a4a4a",
-        lowQ ? null : "#666"
+        isPressed ? pressedColor : bgColor,
+        lowQ ? null : borderColor
     );
 
     if (lowQ) return;
@@ -102,7 +112,7 @@ function drawSmallButton(ctx, x, y, w, h, label, isPressed, disabled) {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = isPressed ? "#ccc" : "#ddd";
+    ctx.fillStyle = isPressed ? textPressedColor : textColor;
     ctx.font = "11px Arial";
     ctx.fillText(label, x + w / 2, y + h / 2 + offsetY);
     ctx.restore();
@@ -182,8 +192,8 @@ function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
 
             if (lowQ) return;
 
-            // Vertical center for label and buttons (shifted down for divider)
-            const centerY = y + height * 0.5 + 3;
+            // Vertical center for label and buttons (shifted down past divider)
+            const centerY = y + height * 0.5 + 4;
 
             // Label
             ctx.save();
@@ -194,23 +204,32 @@ function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
             ctx.fillText(`Model ${this._entryIndex}`, margin + 2, centerY);
             ctx.restore();
 
-            // Button layout (right-aligned): [▲] [▼] [✕]
+            // Button layout (right-aligned): [▲] [▼]  [✕]
             const btnH = 16;
             const btnW = 20;
-            const btnGap = 3;
+            const btnGap = 4;
+            const deleteSeparation = 10;
             const btnY = centerY - btnH / 2;
 
             const isFirst = this._entryIndex === 1;
             const isLast = this._entryIndex === node._modelCount;
             const isOnly = node._modelCount <= 1;
 
+            const deleteColors = {
+                bg: "#5a2a2a",
+                pressed: "#4a1a1a",
+                border: "#8a3a3a",
+                text: "#e66",
+                textPressed: "#c55",
+            };
+
             // ✕ Delete (rightmost)
             const delX = width - margin - btnW;
             this._deleteBounds = [delX, btnY, btnW, btnH];
-            drawSmallButton(ctx, delX, btnY, btnW, btnH, "\u2715", this._deletePressed, isOnly);
+            drawSmallButton(ctx, delX, btnY, btnW, btnH, "\u2715", this._deletePressed, isOnly, deleteColors);
 
             // ▼ Move Down
-            const downX = delX - btnW - btnGap;
+            const downX = delX - btnW - deleteSeparation;
             this._downBounds = [downX, btnY, btnW, btnH];
             drawSmallButton(ctx, downX, btnY, btnW, btnH, "\u25BC", this._downPressed, isLast);
 
@@ -287,7 +306,7 @@ function createEntryHeaderWidget(index, onMoveUp, onMoveDown, onDelete) {
         },
 
         computeSize(width) {
-            return [width, LiteGraph.NODE_WIDGET_HEIGHT + 8];
+            return [width, LiteGraph.NODE_WIDGET_HEIGHT + 12];
         },
 
         serializeValue() { return null; },
