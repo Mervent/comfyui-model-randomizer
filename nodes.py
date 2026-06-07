@@ -166,3 +166,135 @@ class ModelRandomizer:
         model, clip, vae = self._load_checkpoint(selected["ckpt"])
 
         return (model, clip, vae, selected["ckpt"], cfg_value)
+
+
+class WAN22LoraRandomizer:
+    """Randomly selects WAN2.2 LoRA pairs from a configurable list.
+    Each entry is a high/low LoRA pair with a chance of being applied.
+    Outputs two CR-compatible LORA_STACKs: one for high LoRAs, one for low.
+    In exclusive mode, only one pair is selected via weighted random choice."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xFFFFFFFFFFFFFFFF,
+                    "control_after_generate": True,
+                    "tooltip": "Seed for reproducible selection. 0 = random every time.",
+                }),
+                "exclusive_mode": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": (
+                        "When enabled, only one LoRA pair is selected using "
+                        "chance values as relative weights."
+                    ),
+                }),
+            },
+            "optional": FlexibleOptionalInputType(any_type),
+            "hidden": {},
+        }
+
+    RETURN_TYPES = ("LORA_STACK", "LORA_STACK")
+    RETURN_NAMES = ("LORA_STACK_HIGH", "LORA_STACK_LOW")
+    OUTPUT_TOOLTIPS = (
+        "CR-compatible LoRA stack containing the high LoRAs from selected pairs.",
+        "CR-compatible LoRA stack containing the low LoRAs from selected pairs.",
+    )
+    FUNCTION = "execute"
+    CATEGORY = "loaders"
+    DESCRIPTION = (
+        "Randomly selects WAN2.2 LoRA pairs from a configurable list. "
+        "Each entry is a high/low pair with its own chance and strength. "
+        "Outputs two CR-compatible LORA_STACKs for high and low LoRAs."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, **kwargs):
+        for key, value in kwargs.items():
+            if (key.startswith("lora_high_") or key.startswith("lora_low_")) \
+                    and isinstance(value, str) and value and value != "None":
+                if not folder_paths.get_full_path("loras", value):
+                    return f"LoRA not found: {value}"
+        return True
+
+    def _parse_entries(self, kwargs):
+        """Parse kwargs into a list of LoRA pair entry dicts, keyed by index."""
+        indices = set()
+        for key in kwargs:
+            if key.startswith("lora_high_"):
+                try:
+                    idx = int(key.split("_", 2)[2])
+                    indices.add(idx)
+                except (ValueError, IndexError):
+                    continue
+
+        entries = []
+        for idx in sorted(indices):
+            lora_high = kwargs.get(f"lora_high_{idx}")
+            lora_low = kwargs.get(f"lora_low_{idx}")
+
+            if not lora_high or lora_high == "None":
+                continue
+            if not lora_low or lora_low == "None":
+                continue
+
+            enabled = kwargs.get(f"enabled_{idx}", True)
+            if not enabled:
+                continue
+
+            chance = float(kwargs.get(f"chance_{idx}", 1.0))
+            if chance <= 0:
+                continue
+
+            model_weight = float(kwargs.get(f"model_weight_{idx}", 1.0))
+            clip_weight = float(kwargs.get(f"clip_weight_{idx}", 1.0))
+
+            entries.append({
+                "lora_high": lora_high,
+                "lora_low": lora_low,
+                "chance": chance,
+                "model_weight": model_weight,
+                "clip_weight": clip_weight,
+            })
+
+        return entries
+
+    def execute(self, seed=0, exclusive_mode=False, **kwargs):
+        entries = self._parse_entries(kwargs)
+
+        if not entries:
+            return ([], [])
+
+        rng = random.Random(seed) if seed != 0 else random.Random()
+
+        selected = []
+
+        if exclusive_mode:
+            # Treat chance values as relative weights, pick exactly one
+            weights = [e["chance"] for e in entries]
+            winner = rng.choices(entries, weights=weights, k=1)[0]
+            selected.append(winner)
+        else:
+            # Each entry independently evaluated against its chance
+            for entry in entries:
+                if rng.random() < entry["chance"]:
+                    selected.append(entry)
+
+        # Build CR-compatible stacks: [(lora_name, model_weight, clip_weight), ...]
+        stack_high = [
+            (e["lora_high"], e["model_weight"], e["clip_weight"])
+            for e in selected
+        ]
+        stack_low = [
+            (e["lora_low"], e["model_weight"], e["clip_weight"])
+            for e in selected
+        ]
+
+        return (stack_high, stack_low)
